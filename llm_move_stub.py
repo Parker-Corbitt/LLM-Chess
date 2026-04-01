@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Minimal adapter for play_chess.py.
+"""Minimal adapter for `play_chess.py`.
 
 Reads JSON payload on stdin and prints one UCI move to stdout.
 Replace the selection logic with an LLM call when ready.
@@ -12,6 +12,7 @@ import sys
 
 
 def main() -> int:
+    """Read payload, pick a legal move, and print it to stdout."""
     try:
         payload = json.load(sys.stdin)
     except json.JSONDecodeError as exc:

@@ -154,3 +154,29 @@ Tune sampling (default is now `0.4`):
 ```bash
 OLLAMA_TEMPERATURE=0.7 python3 play_chess.py --white-player human --black-player llm --debug
 ```
+
+## 8) Code reference
+
+### `play_chess.py`
+
+- Purpose: terminal game loop, move legality checks, and adapter subprocess integration.
+- Key functions:
+  - `get_llm_move(...)`: builds payload and calls adapter command on stdin/stdout.
+  - `extract_move_from_llm_stdout(...)`: accepts raw UCI or JSON (`move`/`best_move`/`uci`).
+  - `get_human_move(...)`: interactive human input handling (`legal`, `resign`, `quit`).
+
+### `ollama_gemma_adapter.py`
+
+- Purpose: Ollama-backed adapter that performs `router -> phase` selection each turn.
+- Flow:
+  1. Render `router.txt`, call model, extract phase.
+  2. Render selected phase prompt (`opening.txt`/`middlegame.txt`/`endgame.txt`), call model.
+  3. Extract legal UCI move; if opening is out-of-book, fall through to middlegame.
+- Safety:
+  - On parsing/network failures, returns first legal move as fallback.
+  - Debug mode prints raw router/phase responses to stderr.
+
+### `llm_move_stub.py`
+
+- Purpose: minimal contract example for custom adapters.
+- Behavior: reads payload JSON and prints first legal move.

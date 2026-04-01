@@ -1,5 +1,9 @@
 #!/usr/bin/env python3
-"""Play chess in the terminal with UCI moves, against a human or an LLM adapter."""
+"""Terminal chess runner with optional LLM-backed players.
+
+This module owns the game loop and move validation. For LLM turns, it builds
+position JSON and calls an external adapter command on stdin/stdout.
+"""
 
 from __future__ import annotations
 
@@ -21,12 +25,14 @@ except ImportError as exc:  # pragma: no cover
 
 
 def board_to_pgn(board: chess.Board) -> str:
+    """Return the current game as compact PGN (no headers/variations/comments)."""
     game = chess.pgn.Game.from_board(board)
     exporter = chess.pgn.StringExporter(headers=False, variations=False, comments=False)
     return game.accept(exporter).strip()
 
 
 def parse_uci_or_none(text: str, board: chess.Board) -> Optional[chess.Move]:
+    """Parse a UCI move and ensure it is legal in `board`; otherwise return `None`."""
     move_text = text.strip()
     if not move_text:
         return None
@@ -38,6 +44,7 @@ def parse_uci_or_none(text: str, board: chess.Board) -> Optional[chess.Move]:
 
 
 def render_position(board: chess.Board) -> None:
+    """Print an ASCII board plus machine-readable context (FEN/PGN/side to move)."""
     print("\n" + str(board))
     print(f"FEN: {board.fen()}")
     if board.move_stack:
@@ -46,12 +53,20 @@ def render_position(board: chess.Board) -> None:
 
 
 def show_legal_moves(board: chess.Board) -> None:
+    """Print current legal moves in UCI form on one line."""
     legal = [move.uci() for move in board.legal_moves]
     print("Legal moves (UCI):")
     print(" ".join(legal))
 
 
 def get_human_move(board: chess.Board, show_legal: bool) -> Optional[chess.Move]:
+    """Prompt until a valid action is provided.
+
+    Returns:
+    - `None` if user quits
+    - `chess.Move.null()` if user resigns
+    - a legal move otherwise
+    """
     if show_legal:
         show_legal_moves(board)
     while True:
@@ -72,6 +87,12 @@ def get_human_move(board: chess.Board, show_legal: bool) -> Optional[chess.Move]
 
 
 def extract_move_from_llm_stdout(stdout_text: str) -> str:
+    """Extract a candidate move from adapter stdout.
+
+    Supported adapter outputs:
+    - raw UCI text: `e2e4`
+    - JSON object with one of: `move`, `best_move`, `uci`
+    """
     text = stdout_text.strip()
     if not text:
         raise ValueError("LLM command returned empty output.")
@@ -90,6 +111,12 @@ def get_llm_move(
     system_prompt: str,
     debug: bool = False,
 ) -> chess.Move:
+    """Request a move from the configured adapter command.
+
+    The adapter receives JSON on stdin (position, legal moves, prompt context)
+    and must print a move on stdout. This function validates legality before
+    returning.
+    """
     payload = {
         "fen": board.fen(),
         "pgn": board_to_pgn(board),
@@ -141,6 +168,7 @@ def get_llm_move(
 
 
 def parse_args() -> argparse.Namespace:
+    """Define and parse CLI arguments for terminal play."""
     parser = argparse.ArgumentParser(
         description="Play chess with UCI moves in terminal (human and/or LLM players)."
     )
@@ -195,6 +223,7 @@ def parse_args() -> argparse.Namespace:
 
 
 def load_system_prompt(prompt_file: str) -> str:
+    """Load optional strategy text from disk; returns empty string if missing."""
     path = Path(prompt_file)
     if not path.exists():
         return ""
@@ -202,6 +231,7 @@ def load_system_prompt(prompt_file: str) -> str:
 
 
 def main() -> int:
+    """Run one full game until termination condition is reached."""
     args = parse_args()
 
     if not args.llm_command:

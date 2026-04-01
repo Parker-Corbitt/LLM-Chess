@@ -1,8 +1,14 @@
 #!/usr/bin/env python3
-"""Ollama adapter for play_chess.py.
+"""Ollama adapter for `play_chess.py`.
 
-Reads JSON payload on stdin and prints one legal UCI move to stdout.
-Uses two LLM calls per turn: router -> phase-specific prompt.
+Execution model per turn:
+1. Read payload JSON from stdin.
+2. Route the position into OPENING/MIDDLEGAME/ENDGAME.
+3. Run the selected phase prompt to choose a move.
+4. Validate/extract a legal UCI move and print it to stdout.
+
+On model/parsing/network failures, falls back to the first legal move so the
+game loop can continue.
 """
 
 from __future__ import annotations
@@ -54,6 +60,7 @@ Output JSON only:
 
 
 def resolve_prompt_path(path_str: str) -> Path:
+    """Resolve prompt path relative to this script unless already absolute."""
     path = Path(path_str)
     if path.is_absolute():
         return path
@@ -61,6 +68,7 @@ def resolve_prompt_path(path_str: str) -> Path:
 
 
 def load_prompt(path_str: str, fallback: str) -> str:
+    """Load prompt text from disk, or return fallback text if file is missing."""
     path = resolve_prompt_path(path_str)
     if path.exists():
         return path.read_text(encoding="utf-8").strip()
@@ -68,6 +76,7 @@ def load_prompt(path_str: str, fallback: str) -> str:
 
 
 def parse_debug_flag(value: object) -> bool:
+    """Coerce common truthy representations to a bool debug flag."""
     if isinstance(value, bool):
         return value
     if isinstance(value, str):
@@ -78,6 +87,7 @@ def parse_debug_flag(value: object) -> bool:
 
 
 def parse_temperature(value: object) -> float:
+    """Parse per-request temperature value with env-backed default fallback."""
     if value is None:
         return DEFAULT_TEMPERATURE
     if isinstance(value, (int, float)):
@@ -91,6 +101,7 @@ def parse_temperature(value: object) -> float:
 
 
 def normalize_phase(text: str) -> str | None:
+    """Normalize noisy phase text into OPENING/MIDDLEGAME/ENDGAME when possible."""
     token = text.strip().upper()
     for phase in ("OPENING", "MIDDLEGAME", "ENDGAME"):
         if phase == token:
@@ -102,10 +113,12 @@ def normalize_phase(text: str) -> str | None:
 
 
 def to_json_text(value: object) -> str:
+    """Serialize values for text-template placeholders."""
     return json.dumps(value, ensure_ascii=False)
 
 
 def render_prompt_template(template: str, payload: dict) -> str:
+    """Render `{placeholder}` fields used by prompt files from request payload."""
     legal_moves = payload.get("legal_moves", [])
     replacements = {
         "fen": payload.get("fen", ""),
@@ -125,6 +138,7 @@ def render_prompt_template(template: str, payload: dict) -> str:
 
 
 def call_ollama(system_prompt: str, user_prompt: str, temperature: float) -> tuple[str, str]:
+    """Call Ollama `/api/chat` and return `(message.content, raw_json_response)`."""
     body = {
         "model": MODEL,
         "stream": False,
@@ -152,6 +166,7 @@ def call_ollama(system_prompt: str, user_prompt: str, temperature: float) -> tup
 
 
 def extract_json_object(text: str) -> dict[str, Any] | None:
+    """Best-effort extraction of a JSON object from model output text."""
     cleaned = text.strip()
     if cleaned.startswith("```"):
         cleaned = re.sub(r"^```(?:json)?\\s*", "", cleaned, flags=re.IGNORECASE)
@@ -179,6 +194,7 @@ def extract_json_object(text: str) -> dict[str, Any] | None:
 
 
 def extract_uci(text: str, legal_moves: set[str]) -> str:
+    """Extract one legal UCI move from text or JSON output."""
     candidate = text.strip()
     if candidate.startswith("{"):
         data = json.loads(candidate)
@@ -201,6 +217,7 @@ def extract_uci(text: str, legal_moves: set[str]) -> str:
 
 
 def collect_candidates(obj: Any, out: list[str]) -> None:
+    """Recursively gather move-like string fields from nested JSON."""
     if isinstance(obj, dict):
         for key, value in obj.items():
             if key in {"best_move", "chosen_move", "move", "uci"} and isinstance(value, str):
@@ -212,6 +229,7 @@ def collect_candidates(obj: Any, out: list[str]) -> None:
 
 
 def extract_phase(router_text: str) -> str | None:
+    """Extract routed phase from router output JSON or fallback regex scan."""
     parsed = extract_json_object(router_text)
     if parsed is not None:
         phase_value = parsed.get("phase")
@@ -227,6 +245,7 @@ def extract_phase(router_text: str) -> str | None:
 
 
 def extract_move_from_phase_output(text: str, legal_moves: set[str]) -> str:
+    """Extract a legal move from phase output, scanning nested JSON first."""
     parsed = extract_json_object(text)
     if parsed is not None:
         candidates: list[str] = []
@@ -240,6 +259,7 @@ def extract_move_from_phase_output(text: str, legal_moves: set[str]) -> str:
 
 
 def is_out_of_book_opening_response(text: str) -> bool:
+    """Detect whether an OPENING response indicates out-of-book status."""
     parsed = extract_json_object(text)
     if parsed is not None:
         status = parsed.get("status")
@@ -254,6 +274,7 @@ def is_out_of_book_opening_response(text: str) -> bool:
 
 
 def build_router_system_prompt(master_prompt: str) -> str:
+    """Compose system instructions for the routing call."""
     base = (
         "You are a chess phase router. "
         "Return strictly JSON and classify one phase: OPENING, MIDDLEGAME, or ENDGAME."
@@ -264,6 +285,7 @@ def build_router_system_prompt(master_prompt: str) -> str:
 
 
 def build_phase_system_prompt(master_prompt: str, phase: str) -> str:
+    """Compose system instructions for a phase selection call."""
     base = (
         f"You are a chess {phase.lower()} move selector. "
         "Return strictly JSON as requested and choose exactly one legal move from legal_moves."
@@ -274,6 +296,11 @@ def build_phase_system_prompt(master_prompt: str, phase: str) -> str:
 
 
 def main() -> int:
+    """Adapter entrypoint used by `play_chess.py`.
+
+    Input: JSON payload on stdin.
+    Output: one UCI move on stdout.
+    """
     try:
         payload = json.load(sys.stdin)
     except json.JSONDecodeError as exc:
