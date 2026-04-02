@@ -22,6 +22,13 @@ import urllib.request
 from pathlib import Path
 from typing import Any
 
+try:
+    import chess
+except ImportError as exc:  # pragma: no cover
+    raise SystemExit(
+        "Missing dependency: python-chess. Install with: pip install python-chess"
+    ) from exc
+
 SCRIPT_DIR = Path(__file__).resolve().parent
 
 MODEL = os.getenv("OLLAMA_MODEL", "llama4:latest")
@@ -60,6 +67,17 @@ Output JSON only:
 {"best_move":"uci"}
 """
 
+UCI_MOVE_RE = re.compile(r"\b([a-h][1-8])([a-h][1-8])([qrbnQBRN])?\b")
+LAN_MOVE_RE = re.compile(
+    r"\b(?:[KQRBN])?([a-h][1-8])\s*[-x]\s*([a-h][1-8])(?:\s*=\s*([qrbnQBRN]))?[+#]?\b",
+    re.IGNORECASE,
+)
+SAN_FRAGMENT_RE = re.compile(
+    r"\b(?:O-O-O|O-O|0-0-0|0-0|[KQRBN]?[a-h]?[1-8]?x?[a-h][1-8](?:=[QBRNqbrn])?[+#]?|"
+    r"[KQRBN][a-h]?[1-8]?[+#]?)\b",
+    re.IGNORECASE,
+)
+
 
 def resolve_prompt_path(path_str: str) -> Path:
     """Resolve prompt path relative to this script unless already absolute."""
@@ -77,15 +95,25 @@ def load_prompt(path_str: str, fallback: str) -> str:
     return fallback
 
 
-def parse_debug_flag(value: object) -> bool:
-    """Coerce common truthy representations to a bool debug flag."""
+def parse_debug_level(value: object) -> int:
+    """Coerce common debug representations into an integer debug level."""
     if isinstance(value, bool):
-        return value
+        return 1 if value else 0
+    if isinstance(value, int):
+        return max(0, value)
+    if isinstance(value, float):
+        return max(0, int(value))
     if isinstance(value, str):
-        return value.strip().lower() in {"1", "true", "yes", "on"}
-    if isinstance(value, (int, float)):
-        return bool(value)
-    return False
+        normalized = value.strip().lower()
+        if normalized in {"", "0", "false", "no", "off"}:
+            return 0
+        if normalized in {"true", "yes", "on"}:
+            return 1
+        try:
+            return max(0, int(normalized))
+        except ValueError:
+            return 1
+    return 0
 
 
 def parse_temperature(value: object) -> float:
@@ -195,27 +223,120 @@ def extract_json_object(text: str) -> dict[str, Any] | None:
     return None
 
 
-def extract_uci(text: str, legal_moves: set[str]) -> str:
-    """Extract one legal UCI move from text or JSON output."""
-    candidate = text.strip()
-    if candidate.startswith("{"):
-        data = json.loads(candidate)
-        for key in ("move", "best_move", "chosen_move", "uci"):
-            value = data.get(key)
-            if isinstance(value, str):
-                candidate = value.strip()
-                break
+def clean_move_text(text: str) -> str:
+    """Normalize lightweight notation noise around a candidate move string."""
+    cleaned = text.strip().strip("`\"'")
+    cleaned = cleaned.replace("–", "-").replace("—", "-").replace("−", "-")
+    cleaned = cleaned.replace("0-0-0", "O-O-O").replace("0-0", "O-O")
+    cleaned = re.sub(r"\s+", "", cleaned)
+    cleaned = re.sub(r"[!?]+", "", cleaned)
+    cleaned = cleaned.rstrip(".,;:")
+    return cleaned
 
-    candidate = candidate.split()[0]
-    candidate = re.sub(r"[^a-h1-8qrbn]", "", candidate.lower())
-    if candidate in legal_moves:
-        return candidate
 
-    for match in re.findall(r"[a-h][1-8][a-h][1-8][qrbn]?", text.lower()):
-        if match in legal_moves:
-            return match
+def standardize_san_text(text: str) -> str:
+    """Normalize SAN/LAN casing for piece letters, promotions, and castling."""
+    cleaned = clean_move_text(text)
+    cleaned = re.sub(r"^(o-o-o|0-0-0)$", "O-O-O", cleaned, flags=re.IGNORECASE)
+    cleaned = re.sub(r"^(o-o|0-0)$", "O-O", cleaned, flags=re.IGNORECASE)
+    cleaned = re.sub(r"^([kqrbn])", lambda match: match.group(1).upper(), cleaned)
+    cleaned = re.sub(r"=([kqrbn])", lambda match: "=" + match.group(1).upper(), cleaned)
+    return cleaned
 
-    raise ValueError(f"No legal UCI move found in model output: {text!r}")
+
+def move_from_uci_text(text: str, board: chess.Board) -> chess.Move | None:
+    """Parse UCI-like coordinate notation into a legal move when possible."""
+    cleaned = clean_move_text(text).lower()
+    match = UCI_MOVE_RE.fullmatch(cleaned)
+    if match is None:
+        return None
+
+    promotion = (match.group(3) or "").lower()
+    candidate = f"{match.group(1)}{match.group(2)}{promotion}"
+    try:
+        move = chess.Move.from_uci(candidate)
+    except ValueError:
+        return None
+    return move if move in board.legal_moves else None
+
+
+def move_from_lan_text(text: str, board: chess.Board) -> chess.Move | None:
+    """Parse long algebraic / coordinate-hyphen notation into a legal move."""
+    cleaned = standardize_san_text(text)
+    match = LAN_MOVE_RE.fullmatch(cleaned)
+    if match is None:
+        return None
+
+    promotion = (match.group(3) or "").lower()
+    candidate = f"{match.group(1)}{match.group(2)}{promotion}"
+    try:
+        move = chess.Move.from_uci(candidate)
+    except ValueError:
+        return None
+    return move if move in board.legal_moves else None
+
+
+def move_from_san_text(text: str, board: chess.Board) -> chess.Move | None:
+    """Parse SAN or standard castling notation into a legal move."""
+    cleaned = standardize_san_text(text)
+    if not cleaned:
+        return None
+    try:
+        return board.parse_san(cleaned)
+    except ValueError:
+        return None
+
+
+def move_from_castling_phrase(text: str, board: chess.Board) -> chess.Move | None:
+    """Parse common natural-language castling phrases."""
+    lowered = text.lower()
+    castle_targets: list[str] = []
+    if "queenside castle" in lowered or "castle queenside" in lowered or "long castle" in lowered:
+        castle_targets.append("O-O-O")
+    if "kingside castle" in lowered or "castle kingside" in lowered or "short castle" in lowered:
+        castle_targets.append("O-O")
+
+    for notation in castle_targets:
+        move = move_from_san_text(notation, board)
+        if move is not None:
+            return move
+    return None
+
+
+def candidate_fragments(text: str) -> list[str]:
+    """Extract move-like fragments from noisy model text."""
+    fragments: list[str] = []
+
+    def add(fragment: str) -> None:
+        cleaned = fragment.strip()
+        if cleaned and cleaned not in fragments:
+            fragments.append(cleaned)
+
+    add(text.strip())
+    for pattern in (UCI_MOVE_RE, LAN_MOVE_RE, SAN_FRAGMENT_RE):
+        for match in pattern.finditer(text):
+            add(match.group(0))
+    return fragments
+
+
+def parse_move_candidate(text: str, board: chess.Board) -> chess.Move | None:
+    """Best-effort parsing for common LLM move output formats."""
+    for fragment in candidate_fragments(text):
+        for parser in (
+            move_from_uci_text,
+            move_from_lan_text,
+            move_from_san_text,
+            move_from_castling_phrase,
+        ):
+            move = parser(fragment, board)
+            if move is not None:
+                return move
+    return None
+
+
+def move_to_uci(move: chess.Move) -> str:
+    """Return the canonical UCI string for a parsed move."""
+    return move.uci()
 
 
 def collect_candidates(obj: Any, out: list[str]) -> None:
@@ -246,7 +367,7 @@ def extract_phase(router_text: str) -> str | None:
     return None
 
 
-def extract_move_from_phase_output(text: str, legal_moves: set[str]) -> str:
+def extract_move_from_phase_output(text: str, board: chess.Board) -> str:
     """Extract a legal move from phase output, scanning nested JSON first."""
     parsed = extract_json_object(text)
     if parsed is not None:
@@ -254,10 +375,63 @@ def extract_move_from_phase_output(text: str, legal_moves: set[str]) -> str:
         collect_candidates(parsed, candidates)
         for candidate in candidates:
             try:
-                return extract_uci(candidate, legal_moves)
+                move = parse_move_candidate(candidate, board)
+                if move is not None:
+                    return move_to_uci(move)
             except (ValueError, json.JSONDecodeError):
                 continue
-    return extract_uci(text, legal_moves)
+
+    move = parse_move_candidate(text, board)
+    if move is not None:
+        return move_to_uci(move)
+
+    raise ValueError(f"No legal move found in model output: {text!r}")
+
+
+def extract_reasoning_summary(text: str) -> str | None:
+    """Extract a concise reasoning summary from phase output JSON when available."""
+    parsed = extract_json_object(text)
+    if parsed is None:
+        return None
+
+    for key in (
+        "explanation",
+        "justification",
+        "retrieval_summary",
+        "why_advantage",
+        "plan",
+    ):
+        value = parsed.get(key)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+
+    candidate_moves = parsed.get("candidate_moves")
+    if isinstance(candidate_moves, list):
+        snippets: list[str] = []
+        for item in candidate_moves[:2]:
+            if not isinstance(item, dict):
+                continue
+            move = item.get("move")
+            why = item.get("why")
+            if isinstance(move, str) and isinstance(why, str) and why.strip():
+                snippets.append(f"{move}: {why.strip()}")
+        if snippets:
+            return " | ".join(snippets)
+
+    top3 = parsed.get("top3")
+    if isinstance(top3, list):
+        snippets = []
+        for item in top3[:2]:
+            if not isinstance(item, dict):
+                continue
+            move = item.get("move")
+            idea = item.get("strategic_idea")
+            if isinstance(move, str) and isinstance(idea, str) and idea.strip():
+                snippets.append(f"{move}: {idea.strip()}")
+        if snippets:
+            return " | ".join(snippets)
+
+    return None
 
 
 def is_out_of_book_opening_response(text: str) -> bool:
@@ -314,8 +488,18 @@ def main() -> int:
         print("No legal moves in payload.", file=sys.stderr)
         return 1
 
-    legal_set = set(legal_moves)
-    debug = parse_debug_flag(payload.get("debug", False))
+    fen = payload.get("fen")
+    if not isinstance(fen, str) or not fen.strip():
+        print("Missing valid FEN in payload.", file=sys.stderr)
+        return 2
+
+    try:
+        board = chess.Board(fen)
+    except ValueError as exc:
+        print(f"Invalid FEN in payload: {exc}", file=sys.stderr)
+        return 2
+
+    debug = parse_debug_level(payload.get("debug", 0))
     temperature = parse_temperature(payload.get("temperature"))
     master_prompt = payload.get("system_prompt", "")
 
@@ -346,7 +530,7 @@ def main() -> int:
 
         if phase == "OPENING":
             try:
-                opening_move = extract_move_from_phase_output(phase_text, legal_set)
+                opening_move = extract_move_from_phase_output(phase_text, board)
                 if is_out_of_book_opening_response(phase_text):
                     raise ValueError("Opening response marked OUT_OF_BOOK.")
                 move = opening_move
@@ -357,11 +541,11 @@ def main() -> int:
                 phase_system = build_phase_system_prompt(master_prompt, phase)
                 phase_text, phase_raw = call_ollama(phase_system, phase_prompt, temperature)
                 phase_call_logs.append((phase, phase_raw, phase_text))
-                move = extract_move_from_phase_output(phase_text, legal_set)
+                move = extract_move_from_phase_output(phase_text, board)
         else:
-            move = extract_move_from_phase_output(phase_text, legal_set)
+            move = extract_move_from_phase_output(phase_text, board)
 
-        if debug:
+        if debug >= 1:
             print(
                 (
                     f"[ollama-debug] model={MODEL} temperature={temperature} "
@@ -371,17 +555,22 @@ def main() -> int:
             )
             print(f"[ollama-debug] routed_phase: {routed_phase}", file=sys.stderr)
             print(f"[ollama-debug] final_phase: {phase}", file=sys.stderr)
-            print("[ollama-debug] router_raw_response:", file=sys.stderr)
-            print(router_raw.rstrip(), file=sys.stderr)
             print(f"[ollama-debug] router_extracted_content: {router_text!r}", file=sys.stderr)
+            reasoning_summary = extract_reasoning_summary(phase_text)
+            if reasoning_summary:
+                print(f"[ollama-debug] reasoning: {reasoning_summary}", file=sys.stderr)
             for idx, (phase_name, raw_phase, extracted_phase) in enumerate(phase_call_logs, start=1):
                 print(f"[ollama-debug] phase_call_{idx}: {phase_name}", file=sys.stderr)
-                print("[ollama-debug] phase_raw_response:", file=sys.stderr)
-                print(raw_phase.rstrip(), file=sys.stderr)
                 print(
                     f"[ollama-debug] phase_extracted_content: {extracted_phase!r}",
                     file=sys.stderr,
                 )
+                if debug >= 2:
+                    print("[ollama-debug] phase_raw_response:", file=sys.stderr)
+                    print(raw_phase.rstrip(), file=sys.stderr)
+            if debug >= 2:
+                print("[ollama-debug] router_raw_response:", file=sys.stderr)
+                print(router_raw.rstrip(), file=sys.stderr)
             print(f"[ollama-debug] selected_move: {move}", file=sys.stderr)
 
     except (urllib.error.URLError, TimeoutError, ValueError, json.JSONDecodeError) as exc:

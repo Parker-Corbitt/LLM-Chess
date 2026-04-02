@@ -113,7 +113,7 @@ def get_llm_move(
     llm_command: str,
     system_prompt: str,
     opening_db_entries: Optional[list[dict[str, Any]]] = None,
-    debug: bool = False,
+    debug: int = 0,
 ) -> chess.Move:
     """Request a move from the configured adapter command.
 
@@ -153,7 +153,7 @@ def get_llm_move(
         capture_output=True,
         check=False,
     )
-    if debug and result.stderr.strip():
+    if debug >= 1 and result.stderr.strip():
         print("[llm-debug] Adapter stderr:", file=sys.stderr)
         print(result.stderr.rstrip(), file=sys.stderr)
     if result.returncode != 0:
@@ -161,7 +161,7 @@ def get_llm_move(
             "LLM command failed "
             f"(exit={result.returncode}). stderr:\n{result.stderr.strip()}"
         )
-    if debug:
+    if debug >= 1:
         print(f"[llm-debug] Adapter stdout: {result.stdout.strip()!r}", file=sys.stderr)
 
     move_text = extract_move_from_llm_stdout(result.stdout)
@@ -228,8 +228,12 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--debug",
-        action="store_true",
-        help="Print adapter/Ollama debug output to terminal stderr during LLM turns.",
+        action="count",
+        default=0,
+        help=(
+            "Increase debug verbosity. Use once for normal reasoning/debug info, "
+            "twice for raw Ollama responses."
+        ),
     )
     return parser.parse_args()
 
@@ -242,18 +246,18 @@ def load_system_prompt(prompt_file: str) -> str:
     return path.read_text(encoding="utf-8").strip()
 
 
-def load_opening_book_or_none(book_path: str, debug: bool = False) -> Optional[OpeningBook]:
+def load_opening_book_or_none(book_path: str, debug: int = 0) -> Optional[OpeningBook]:
     """Load an opening book if available; otherwise continue without it."""
     path = Path(book_path)
     if not path.exists():
-        if debug:
+        if debug >= 1:
             print(f"[opening-debug] Opening book not found at {path}", file=sys.stderr)
         return None
 
     try:
         return load_opening_book(path)
     except Exception as exc:  # noqa: BLE001
-        if debug:
+        if debug >= 1:
             print(
                 f"[opening-debug] Failed to load opening book {path}: {exc}",
                 file=sys.stderr,
@@ -300,7 +304,7 @@ def main() -> int:
             book_move_text = opening_book.best_move(board) if opening_book is not None else None
             if book_move_text:
                 move = chess.Move.from_uci(book_move_text)
-                if args.debug:
+                if args.debug >= 1:
                     print(
                         f"[opening-debug] exact opening hit for {side_name}: {book_move_text}",
                         file=sys.stderr,
@@ -310,10 +314,19 @@ def main() -> int:
                 opening_db_entries = (
                     opening_book.retrieve_line_context(board) if opening_book is not None else []
                 )
-                if args.debug and opening_db_entries:
+                if args.debug >= 1 and opening_db_entries:
+                    opening_names = list(
+                        dict.fromkeys(
+                            entry.get("opening_name", "")
+                            for entry in opening_db_entries
+                            if isinstance(entry.get("opening_name"), str)
+                            and entry.get("opening_name")
+                        )
+                    )
                     print(
                         f"[opening-debug] passing {len(opening_db_entries)} retrieved opening "
-                        f"context entries to adapter for {side_name}",
+                        f"context entries to adapter for {side_name}: "
+                        f"{', '.join(opening_names) if opening_names else 'unknown openings'}",
                         file=sys.stderr,
                     )
                 try:

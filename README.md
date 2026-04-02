@@ -163,14 +163,15 @@ python3 play_chess.py --black-player llm --prompt-file Master.txt
 - `--start-fen "<fen>"` to start from a custom position
 - `--opening-book-file opening_book.json` to override or disable the local opening book source
 - `--max-plies N` to stop after N half-moves
-- `--debug` to print raw adapter/Ollama diagnostics to terminal stderr
+- `--debug` for level 1 debug output: opening retrieval info, adapter summaries, and model reasoning
+- `--debug --debug` for level 2 debug output: everything in level 1 plus raw Ollama responses
 
 ## 7) Debugging model output and variation
 
 Show raw Ollama response each LLM turn:
 
 ```bash
-python3 play_chess.py --white-player human --black-player llm --debug
+python3 play_chess.py --white-player human --black-player llm --debug --debug
 ```
 
 Tune sampling (default is now `0.4`):
