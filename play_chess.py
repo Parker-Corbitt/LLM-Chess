@@ -23,6 +23,8 @@ except ImportError as exc:  # pragma: no cover
         "Missing dependency: python-chess. Install with: pip install python-chess"
     ) from exc
 
+from opening import DEFAULT_BOOK_PATH, OpeningBook, load_opening_book
+
 
 def board_to_pgn(board: chess.Board) -> str:
     """Return the current game as compact PGN (no headers/variations/comments)."""
@@ -186,17 +188,25 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--llm-command",
-        default="python3 ollama_gemma_adapter.py",
+        default="python3 ollama_adapter.py",
         help=(
             "Command used for each LLM move. It receives JSON on stdin and must output "
             "a UCI move or JSON with move/best_move/uci. "
-            "Default: `python3 ollama_gemma_adapter.py`"
+            "Default: `python3 ollama_adapter.py`"
         ),
     )
     parser.add_argument(
         "--prompt-file",
         default="Master.txt",
         help="Optional system prompt file passed through to the adapter payload.",
+    )
+    parser.add_argument(
+        "--opening-book-file",
+        default=str(DEFAULT_BOOK_PATH),
+        help=(
+            "Optional opening book JSON file. If the current position matches, "
+            "the game uses the book move immediately instead of calling the LLM."
+        ),
     )
     parser.add_argument(
         "--start-fen",
@@ -230,6 +240,25 @@ def load_system_prompt(prompt_file: str) -> str:
     return path.read_text(encoding="utf-8").strip()
 
 
+def load_opening_book_or_none(book_path: str, debug: bool = False) -> Optional[OpeningBook]:
+    """Load an opening book if available; otherwise continue without it."""
+    path = Path(book_path)
+    if not path.exists():
+        if debug:
+            print(f"[opening-debug] Opening book not found at {path}", file=sys.stderr)
+        return None
+
+    try:
+        return load_opening_book(path)
+    except Exception as exc:  # noqa: BLE001
+        if debug:
+            print(
+                f"[opening-debug] Failed to load opening book {path}: {exc}",
+                file=sys.stderr,
+            )
+        return None
+
+
 def main() -> int:
     """Run one full game until termination condition is reached."""
     args = parse_args()
@@ -244,6 +273,7 @@ def main() -> int:
         print(f"Error: invalid --start-fen value: {exc}")
         return 2
     system_prompt = load_system_prompt(args.prompt_file)
+    opening_book = load_opening_book_or_none(args.opening_book_file, args.debug)
 
     plies = 0
     while not board.is_game_over(claim_draw=True):
@@ -265,12 +295,22 @@ def main() -> int:
                 print(f"{side_name} resigned. Winner: {winner}.")
                 return 0
         else:
-            try:
-                move = get_llm_move(board, args.llm_command, system_prompt, args.debug)
-            except Exception as exc:  # noqa: BLE001
-                print(f"LLM move error: {exc}")
-                return 1
-            print(f"LLM ({side_name}) plays: {move.uci()} ({board.san(move)})")
+            book_move_text = opening_book.best_move(board) if opening_book is not None else None
+            if book_move_text:
+                move = chess.Move.from_uci(book_move_text)
+                if args.debug:
+                    print(
+                        f"[opening-debug] exact opening hit for {side_name}: {book_move_text}",
+                        file=sys.stderr,
+                    )
+                print(f"Book ({side_name}) plays: {move.uci()} ({board.san(move)})")
+            else:
+                try:
+                    move = get_llm_move(board, args.llm_command, system_prompt, args.debug)
+                except Exception as exc:  # noqa: BLE001
+                    print(f"LLM move error: {exc}")
+                    return 1
+                print(f"LLM ({side_name}) plays: {move.uci()} ({board.san(move)})")
 
         board.push(move)
         plies += 1

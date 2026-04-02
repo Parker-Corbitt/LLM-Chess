@@ -65,8 +65,11 @@ python3 play_chess.py \
 `play_chess.py` now defaults to:
 
 ```bash
---llm-command "python3 ollama_gemma_adapter.py"
+--llm-command "python3 ollama_adapter.py"
 ```
+
+When an LLM side is on move, `play_chess.py` now checks the local opening book first.
+If the current position matches `opening_book.json`, it plays the top book move immediately and skips the adapter call for that turn.
 
 Override model (optional):
 
@@ -138,6 +141,7 @@ python3 play_chess.py --black-player llm --prompt-file Master.txt
 ## 6) Optional flags
 
 - `--start-fen "<fen>"` to start from a custom position
+- `--opening-book-file opening_book.json` to override or disable the local opening book source
 - `--max-plies N` to stop after N half-moves
 - `--debug` to print raw adapter/Ollama diagnostics to terminal stderr
 
