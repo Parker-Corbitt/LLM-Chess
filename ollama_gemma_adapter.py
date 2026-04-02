@@ -24,10 +24,10 @@ from typing import Any
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 
-MODEL = os.getenv("OLLAMA_MODEL", "gemma3:12b")
+MODEL = os.getenv("OLLAMA_MODEL", "llama4:latest")
 OLLAMA_CHAT_URL = os.getenv("OLLAMA_CHAT_URL", "http://127.0.0.1:11434/api/chat")
-TIMEOUT_SECONDS = float(os.getenv("OLLAMA_TIMEOUT_SECONDS", "90"))
-DEFAULT_TEMPERATURE = float(os.getenv("OLLAMA_TEMPERATURE", "0.4"))
+TIMEOUT_SECONDS = float(os.getenv("OLLAMA_TIMEOUT_SECONDS", "120"))
+DEFAULT_TEMPERATURE = float(os.getenv("OLLAMA_TEMPERATURE", "0.5"))
 
 ROUTER_PROMPT_FILE = os.getenv("ROUTER_PROMPT_FILE", "router.txt")
 OPENING_PROMPT_FILE = os.getenv("OPENING_PROMPT_FILE", "opening.txt")
