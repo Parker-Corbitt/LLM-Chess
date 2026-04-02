@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
-"""Opening-book loader and exact-position lookup helpers.
+"""Opening-book loader and retrieval helpers.
 
 This module implements the first step of the opening-book plan:
 1. Load a small curated opening database from disk.
 2. Index each reachable position to one or more known book moves.
-3. Return structured metadata for later integration with `play_chess.py`
-   and the LLM adapter payload.
+3. Return structured opening-line context for later integration with
+   `play_chess.py` and the LLM adapter payload.
 
 The lookup is deterministic and position-based. It does not use embeddings or
 semantic retrieval; for chess openings, exact board-state matching is the right
@@ -103,11 +103,43 @@ class OpeningChoice:
         }
 
 
+@dataclass(frozen=True)
+class RetrievedOpeningLine:
+    """One retrieved opening line snippet for a matched position."""
+
+    line: OpeningLine
+    matched_plies: int
+    next_move: str | None
+    remaining_moves: tuple[str, ...]
+
+    def to_payload(self, retrieval_type: str, current_plies: int) -> dict[str, Any]:
+        """Return a JSON-serializable line-centric RAG payload."""
+
+        return {
+            "retrieval_type": retrieval_type,
+            "eco_code": self.line.eco,
+            "opening_name": self.line.name,
+            "source": self.line.source,
+            "matched_plies": self.matched_plies,
+            "current_plies": current_plies,
+            "line_prefix": list(self.line.moves[: self.matched_plies]),
+            "candidate_continuation": self.next_move,
+            "remaining_line": list(self.remaining_moves),
+            "line_length": len(self.line.moves),
+        }
+
+
 class OpeningBook:
     """Indexed opening book keyed by exact board state."""
 
-    def __init__(self, index: dict[str, list[OpeningChoice]], line_count: int) -> None:
+    def __init__(
+        self,
+        index: dict[str, list[OpeningChoice]],
+        line_index: dict[str, list[RetrievedOpeningLine]],
+        line_count: int,
+    ) -> None:
         self._index = index
+        self._line_index = line_index
         self.line_count = line_count
 
     @classmethod
@@ -115,6 +147,7 @@ class OpeningBook:
         """Build an opening book from validated opening lines."""
 
         index: dict[str, dict[str, dict[str, Any]]] = {}
+        line_index: dict[str, list[RetrievedOpeningLine]] = {}
         line_count = 0
 
         for line in lines:
@@ -137,6 +170,14 @@ class OpeningBook:
 
                 key = position_key(board)
                 move_bucket = index.setdefault(key, {})
+                line_index.setdefault(key, []).append(
+                    RetrievedOpeningLine(
+                        line=line,
+                        matched_plies=depth - 1,
+                        next_move=move_text,
+                        remaining_moves=line.moves[depth - 1 :],
+                    )
+                )
                 aggregate = move_bucket.setdefault(
                     move_text,
                     {
@@ -171,7 +212,19 @@ class OpeningBook:
             choices.sort(key=lambda choice: (-choice.weight, choice.move))
             normalized_index[key] = choices
 
-        return cls(index=normalized_index, line_count=line_count)
+        normalized_line_index: dict[str, list[RetrievedOpeningLine]] = {}
+        for key, line_entries in line_index.items():
+            normalized_line_index[key] = sorted(
+                line_entries,
+                key=lambda entry: (
+                    -entry.matched_plies,
+                    -(len(entry.remaining_moves)),
+                    entry.line.eco,
+                    entry.line.name,
+                ),
+            )
+
+        return cls(index=normalized_index, line_index=normalized_line_index, line_count=line_count)
 
     def lookup(self, board: chess.Board) -> list[OpeningChoice]:
         """Return all known book continuations for the current position."""
@@ -183,23 +236,25 @@ class OpeningBook:
 
         return [choice.to_payload() for choice in self.lookup(board)]
 
-    def contextual_payload(self, board: chess.Board) -> list[dict[str, Any]]:
-        """Return opening context for the current board, falling back to recent history.
+    def retrieve_line_context(
+        self,
+        board: chess.Board,
+        *,
+        max_entries: int = 5,
+    ) -> list[dict[str, Any]]:
+        """Return retrieved opening-line context for the current board.
 
         Priority:
-        1. Exact current-position book continuations.
+        1. Exact current-position line retrieval.
         2. Most recent earlier position in the current game that matched the book.
         """
 
-        current_matches = self.lookup(board)
-        if current_matches:
+        current_plies = len(board.move_stack)
+        current_lines = self._line_index.get(position_key(board), [])
+        if current_lines:
             return [
-                {
-                    "match_type": "current_position",
-                    "plies_from_start": len(board.move_stack),
-                    **choice.to_payload(),
-                }
-                for choice in current_matches
+                line.to_payload("exact_position", current_plies)
+                for line in current_lines[:max_entries]
             ]
 
         history_board = board.copy(stack=True)
@@ -208,15 +263,15 @@ class OpeningBook:
         while history_board.move_stack:
             history_board.pop()
             plies_from_start -= 1
-            historical_matches = self.lookup(history_board)
-            if historical_matches:
+            historical_lines = self._line_index.get(position_key(history_board), [])
+            if historical_lines:
                 return [
-                    {
-                        "match_type": "recent_book_position",
-                        "plies_from_start": plies_from_start,
-                        **choice.to_payload(),
+                    line.to_payload("recent_prefix", current_plies)
+                    | {
+                        "matched_plies": plies_from_start,
+                        "plies_since_match": current_plies - plies_from_start,
                     }
-                    for choice in historical_matches
+                    for line in historical_lines[:max_entries]
                 ]
 
         return []

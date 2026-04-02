@@ -8,6 +8,7 @@ position JSON and calls an external adapter command on stdin/stdout.
 from __future__ import annotations
 
 import argparse
+from typing import Any
 import json
 import shlex
 import subprocess
@@ -111,7 +112,7 @@ def get_llm_move(
     board: chess.Board,
     llm_command: str,
     system_prompt: str,
-    opening_db_entries: Optional[list[dict]] = None,
+    opening_db_entries: Optional[list[dict[str, Any]]] = None,
     debug: bool = False,
 ) -> chess.Move:
     """Request a move from the configured adapter command.
@@ -307,12 +308,12 @@ def main() -> int:
                 print(f"Book ({side_name}) plays: {move.uci()} ({board.san(move)})")
             else:
                 opening_db_entries = (
-                    opening_book.contextual_payload(board) if opening_book is not None else []
+                    opening_book.retrieve_line_context(board) if opening_book is not None else []
                 )
                 if args.debug and opening_db_entries:
                     print(
-                        f"[opening-debug] passing {len(opening_db_entries)} opening context entries "
-                        f"to adapter for {side_name}",
+                        f"[opening-debug] passing {len(opening_db_entries)} retrieved opening "
+                        f"context entries to adapter for {side_name}",
                         file=sys.stderr,
                     )
                 try:

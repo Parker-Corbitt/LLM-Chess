@@ -5,6 +5,7 @@ Inputs:
 - PGN so far: {pgn}
 - Side to move: {side_to_move}
 - Move number: {move_number}
+- Retrieved opening line context: {opening_db_entries}
 - Optional clock/time control: {time_info}
 - Optional repetition/50-move info: {draw_state}
 
@@ -15,8 +16,9 @@ Tasks:
    - ENDGAME
 2. Evaluate who has the advantage: WHITE / BLACK / EQUAL.
 3. Give a concise board-state summary (king safety, pawn structure, piece activity, material balance, tactical tension).
-4. Add general game-state metadata not explicitly requested if relevant (initiative, space, weak squares, open files, passed pawns, known theoretical status).
-5. Provide confidence (0.00-1.00).
+4. Use retrieved opening context, if present, to inform whether the position is still in known theory or has transitioned into general play.
+5. Add general game-state metadata not explicitly requested if relevant (initiative, space, weak squares, open files, passed pawns, known theoretical status).
+6. Provide confidence (0.00-1.00).
 
 Output JSON only:
 {

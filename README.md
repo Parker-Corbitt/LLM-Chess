@@ -99,14 +99,17 @@ python3 play_chess.py --white-player human --black-player llm --llm-command "pyt
   "last_move": "e7e5",
   "opening_db_entries": [
     {
-      "match_type": "current_position|recent_book_position",
-      "plies_from_start": 4,
-      "move": "f1c4",
-      "weight": 3,
-      "eco_codes": ["C50"],
-      "opening_names": ["Italian Game"],
-      "sources": ["builtin"],
-      "max_depth": 4
+      "retrieval_type": "exact_position|recent_prefix",
+      "eco_code": "C50",
+      "opening_name": "Italian Game",
+      "source": "builtin",
+      "matched_plies": 4,
+      "current_plies": 5,
+      "line_prefix": ["e2e4", "e7e5", "g1f3", "b8c6"],
+      "candidate_continuation": "f1c4",
+      "remaining_line": ["f1c4", "f8c5"],
+      "line_length": 6,
+      "plies_since_match": 1
     }
   ],
   "time_info": null,
@@ -141,11 +144,11 @@ or
 2. The chosen phase prompt file (`opening.txt`, `middlegame.txt`, `endgame.txt`) selects a move.
 3. If `OPENING` returns out-of-book/no legal move, adapter falls through to `middlegame.txt` in the same turn.
 
-`opening_db_entries` now carries either:
-- exact `current_position` book continuations, or
-- `recent_book_position` lineage from the latest earlier position still recognized in the local opening book.
+`opening_db_entries` is now retrieved opening-line context for RAG:
+- `exact_position` means the current board matches a known book node exactly.
+- `recent_prefix` means the current board is out of book, but a recent earlier position still matched a known opening line.
 
-Only `current_position` entries should be treated as legal book moves for the current board.
+Use these entries as advisory context about opening family, plans, and candidate continuations. Only exact-position continuations should be treated as near-authoritative current move evidence.
 
 `Master.txt` is still loaded by `play_chess.py` and passed as global strategy policy (`system_prompt`) for both calls.
 

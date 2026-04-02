@@ -4,40 +4,43 @@ Inputs:
 - FEN: {fen}
 - PGN so far: {pgn}
 - Side to move: {side_to_move}
-- Opening DB entries for this position: {opening_db_entries}
+- Legal moves: {legal_moves}
+- Retrieved opening line context: {opening_db_entries}
   Each entry includes:
-  - match_type: "current_position" or "recent_book_position"
-  - plies_from_start: depth where the book match occurred
-  - move: UCI move from the matched book position
-  - weight: relative support count in the local book
-  - eco_codes / opening_names / sources / max_depth
+  - retrieval_type: "exact_position" or "recent_prefix"
+  - eco_code / opening_name / source
+  - matched_plies / current_plies
+  - line_prefix: move sequence matched in the book
+  - candidate_continuation: next book move after the matched prefix
+  - remaining_line: continuation from the matched prefix onward
+  - line_length
+  - for recent_prefix entries, plies_since_match
 
 Rules:
-1. If there are any entries with `match_type == "current_position"`, treat those moves as the only valid book moves.
-2. If entries exist only with `match_type == "recent_book_position"`, use them as opening lineage/context only. Do not assume those moves are legal in the current position.
-3. If there are no `current_position` entries, return "OUT_OF_BOOK" and stop.
+1. Treat retrieved opening line context as RAG evidence, not ground truth.
+2. If there are entries with `retrieval_type == "exact_position"`, strongly prefer their `candidate_continuation` values when legal.
+3. If entries exist only with `retrieval_type == "recent_prefix"`, use them only to infer opening family, plans, common piece placement, pawn breaks, and strategic goals.
+4. Never output a move that is not in `legal_moves`.
+5. If the retrieved context does not support a clear current-position continuation, return "OUT_OF_BOOK" and stop.
 
 Tasks:
-1. Select best book move.
-2. Explain why this move is preferred in this position.
-3. Report book support using `weight` and opening family names.
-4. If recent-book context exists, mention the opening family it suggests.
-5. Mention practical tradeoff (solidity, complexity, imbalance, risk).
+1. Infer the most likely opening family from the retrieved lines.
+2. If exact-position retrieval exists, select the best supported continuation from that context.
+3. If only recent-prefix retrieval exists, decide whether the position is still theoretically guided enough to recommend a move from opening principles; otherwise return OUT_OF_BOOK.
+4. Explain how the retrieved lines informed the recommendation.
+5. Mention practical tradeoff (development, center control, king safety, structure, complexity).
 
 Output JSON only:
 {
   "status": "BOOK|OUT_OF_BOOK",
   "chosen_move": "uci_or_san_or_null",
   "opening_name": "optional",
+  "eco_code": "optional",
+  "retrieval_summary": "...",
   "explanation": "...",
-  "chosen_move_stats": {
-    "weight": 0,
-    "supporting_opening_names": ["..."],
-    "supporting_eco_codes": ["..."]
-  },
-  "top_book_moves": [
-    {"move":"...", "weight":0, "opening_names":["..."], "eco_codes":["..."]},
-    {"move":"...", "weight":0, "opening_names":["..."], "eco_codes":["..."]},
-    {"move":"...", "weight":0, "opening_names":["..."], "eco_codes":["..."]}
+  "candidate_moves": [
+    {"move":"...", "source":"retrieved_line|inferred_from_line", "why":"..."},
+    {"move":"...", "source":"retrieved_line|inferred_from_line", "why":"..."},
+    {"move":"...", "source":"retrieved_line|inferred_from_line", "why":"..."}
   ]
 }

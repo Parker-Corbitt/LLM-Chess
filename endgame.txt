@@ -5,6 +5,8 @@ Inputs:
 - PGN so far: {pgn}
 - Side to move: {side_to_move}
 - Legal moves: {legal_moves}
+- Retrieved opening line context: {opening_db_entries}
+  This is usually low-value in the endgame. Ignore it unless it still helps explain pawn structure or long-term imbalances.
 
 Tasks:
 1. Detect known endgame class if possible (e.g., Lucena, Philidor, opposition, rook+pawn vs rook, etc.).

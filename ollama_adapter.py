@@ -40,6 +40,7 @@ Inputs:
 - PGN so far: {pgn}
 - Side to move: {side_to_move}
 - Move number: {move_number}
+- Retrieved opening line context: {opening_db_entries}
 - Optional clock/time control: {time_info}
 - Optional repetition/50-move info: {draw_state}
 
@@ -53,6 +54,7 @@ Inputs:
 - PGN so far: {pgn}
 - Side to move: {side_to_move}
 - Legal moves: {legal_moves}
+- Retrieved opening line context: {opening_db_entries}
 
 Output JSON only:
 {"best_move":"uci"}
