@@ -183,6 +183,44 @@ class OpeningBook:
 
         return [choice.to_payload() for choice in self.lookup(board)]
 
+    def contextual_payload(self, board: chess.Board) -> list[dict[str, Any]]:
+        """Return opening context for the current board, falling back to recent history.
+
+        Priority:
+        1. Exact current-position book continuations.
+        2. Most recent earlier position in the current game that matched the book.
+        """
+
+        current_matches = self.lookup(board)
+        if current_matches:
+            return [
+                {
+                    "match_type": "current_position",
+                    "plies_from_start": len(board.move_stack),
+                    **choice.to_payload(),
+                }
+                for choice in current_matches
+            ]
+
+        history_board = board.copy(stack=True)
+        plies_from_start = len(history_board.move_stack)
+
+        while history_board.move_stack:
+            history_board.pop()
+            plies_from_start -= 1
+            historical_matches = self.lookup(history_board)
+            if historical_matches:
+                return [
+                    {
+                        "match_type": "recent_book_position",
+                        "plies_from_start": plies_from_start,
+                        **choice.to_payload(),
+                    }
+                    for choice in historical_matches
+                ]
+
+        return []
+
     def best_move(self, board: chess.Board) -> str | None:
         """Return the highest-weight book move for the position, if any."""
 

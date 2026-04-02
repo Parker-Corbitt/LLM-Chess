@@ -97,7 +97,18 @@ python3 play_chess.py --white-player human --black-player llm --llm-command "pyt
   "halfmove_clock": 0,
   "legal_moves": ["e2e4", "d2d4", "..."],
   "last_move": "e7e5",
-  "opening_db_entries": [],
+  "opening_db_entries": [
+    {
+      "match_type": "current_position|recent_book_position",
+      "plies_from_start": 4,
+      "move": "f1c4",
+      "weight": 3,
+      "eco_codes": ["C50"],
+      "opening_names": ["Italian Game"],
+      "sources": ["builtin"],
+      "max_depth": 4
+    }
+  ],
   "time_info": null,
   "draw_state": {"halfmove_clock": 0, "can_claim_threefold_repetition": false},
   "system_prompt": "...",
@@ -129,6 +140,12 @@ or
 1. `router.txt` chooses `OPENING`, `MIDDLEGAME`, or `ENDGAME`.
 2. The chosen phase prompt file (`opening.txt`, `middlegame.txt`, `endgame.txt`) selects a move.
 3. If `OPENING` returns out-of-book/no legal move, adapter falls through to `middlegame.txt` in the same turn.
+
+`opening_db_entries` now carries either:
+- exact `current_position` book continuations, or
+- `recent_book_position` lineage from the latest earlier position still recognized in the local opening book.
+
+Only `current_position` entries should be treated as legal book moves for the current board.
 
 `Master.txt` is still loaded by `play_chess.py` and passed as global strategy policy (`system_prompt`) for both calls.
 

@@ -5,20 +5,24 @@ Inputs:
 - PGN so far: {pgn}
 - Side to move: {side_to_move}
 - Opening DB entries for this position: {opening_db_entries}
-  Each entry includes: move, game_count, white_win, draw, black_win, optional ECO/name.
+  Each entry includes:
+  - match_type: "current_position" or "recent_book_position"
+  - plies_from_start: depth where the book match occurred
+  - move: UCI move from the matched book position
+  - weight: relative support count in the local book
+  - eco_codes / opening_names / sources / max_depth
 
 Rules:
-1. Choose moves only from opening_db_entries.
-2. If no entries exist, return "OUT_OF_BOOK" and stop.
+1. If there are any entries with `match_type == "current_position"`, treat those moves as the only valid book moves.
+2. If entries exist only with `match_type == "recent_book_position"`, use them as opening lineage/context only. Do not assume those moves are legal in the current position.
+3. If there are no `current_position` entries, return "OUT_OF_BOOK" and stop.
 
 Tasks:
 1. Select best book move.
 2. Explain why this move is preferred in this position.
-3. Report database support:
-   - number of games for chosen move
-   - W/D/L percentages for chosen move
-   - top 3 candidate book moves by game_count with W/D/L
-4. Mention practical tradeoff (solidity, complexity, imbalance, risk).
+3. Report book support using `weight` and opening family names.
+4. If recent-book context exists, mention the opening family it suggests.
+5. Mention practical tradeoff (solidity, complexity, imbalance, risk).
 
 Output JSON only:
 {
@@ -27,14 +31,13 @@ Output JSON only:
   "opening_name": "optional",
   "explanation": "...",
   "chosen_move_stats": {
-    "games": 0,
-    "white_win_pct": 0.0,
-    "draw_pct": 0.0,
-    "black_win_pct": 0.0
+    "weight": 0,
+    "supporting_opening_names": ["..."],
+    "supporting_eco_codes": ["..."]
   },
   "top_book_moves": [
-    {"move":"...", "games":0, "white_win_pct":0.0, "draw_pct":0.0, "black_win_pct":0.0},
-    {"move":"...", "games":0, "white_win_pct":0.0, "draw_pct":0.0, "black_win_pct":0.0},
-    {"move":"...", "games":0, "white_win_pct":0.0, "draw_pct":0.0, "black_win_pct":0.0}
+    {"move":"...", "weight":0, "opening_names":["..."], "eco_codes":["..."]},
+    {"move":"...", "weight":0, "opening_names":["..."], "eco_codes":["..."]},
+    {"move":"...", "weight":0, "opening_names":["..."], "eco_codes":["..."]}
   ]
 }

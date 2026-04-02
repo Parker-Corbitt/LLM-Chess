@@ -111,6 +111,7 @@ def get_llm_move(
     board: chess.Board,
     llm_command: str,
     system_prompt: str,
+    opening_db_entries: Optional[list[dict]] = None,
     debug: bool = False,
 ) -> chess.Move:
     """Request a move from the configured adapter command.
@@ -128,7 +129,7 @@ def get_llm_move(
         "halfmove_clock": board.halfmove_clock,
         "legal_moves": [move.uci() for move in board.legal_moves],
         "last_move": board.move_stack[-1].uci() if board.move_stack else None,
-        "opening_db_entries": [],
+        "opening_db_entries": opening_db_entries or [],
         "time_info": None,
         "draw_state": {
             "halfmove_clock": board.halfmove_clock,
@@ -305,8 +306,23 @@ def main() -> int:
                     )
                 print(f"Book ({side_name}) plays: {move.uci()} ({board.san(move)})")
             else:
+                opening_db_entries = (
+                    opening_book.contextual_payload(board) if opening_book is not None else []
+                )
+                if args.debug and opening_db_entries:
+                    print(
+                        f"[opening-debug] passing {len(opening_db_entries)} opening context entries "
+                        f"to adapter for {side_name}",
+                        file=sys.stderr,
+                    )
                 try:
-                    move = get_llm_move(board, args.llm_command, system_prompt, args.debug)
+                    move = get_llm_move(
+                        board,
+                        args.llm_command,
+                        system_prompt,
+                        opening_db_entries=opening_db_entries,
+                        debug=args.debug,
+                    )
                 except Exception as exc:  # noqa: BLE001
                     print(f"LLM move error: {exc}")
                     return 1
