@@ -20,7 +20,7 @@ Rules:
 1. Treat retrieved opening line context as RAG evidence, not ground truth.
 2. If there are entries with `retrieval_type == "exact_position"`, strongly prefer their `candidate_continuation` values when legal.
 3. If entries exist only with `retrieval_type == "recent_prefix"`, use them only to infer opening family, plans, common piece placement, pawn breaks, and strategic goals.
-4. Never output a move that is not in `legal_moves`.
+4. Always set `chosen_move_uci` to exactly one move from `legal_moves` in lowercase UCI format like `e2e4` or `e7e8q`.
 5. If the retrieved context does not support a clear current-position continuation, return "OUT_OF_BOOK" and stop.
 
 Tasks:
@@ -33,14 +33,14 @@ Tasks:
 Output JSON only:
 {
   "status": "BOOK|OUT_OF_BOOK",
-  "chosen_move": "uci_or_san_or_null",
+  "chosen_move_uci": "uci_or_null",
   "opening_name": "optional",
   "eco_code": "optional",
   "retrieval_summary": "...",
   "explanation": "...",
   "candidate_moves": [
-    {"move":"...", "source":"retrieved_line|inferred_from_line", "why":"..."},
-    {"move":"...", "source":"retrieved_line|inferred_from_line", "why":"..."},
-    {"move":"...", "source":"retrieved_line|inferred_from_line", "why":"..."}
+    {"move_uci":"...", "source":"retrieved_line|inferred_from_line", "why":"..."},
+    {"move_uci":"...", "source":"retrieved_line|inferred_from_line", "why":"..."},
+    {"move_uci":"...", "source":"retrieved_line|inferred_from_line", "why":"..."}
   ]
 }

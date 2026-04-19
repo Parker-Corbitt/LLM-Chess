@@ -16,11 +16,14 @@ Tasks:
    - immediate tactics (checks/captures/attacks, pins/skewers/forks)
 4. Choose best move and explain practical conversion/holding method.
 
+Rules:
+1. Always set `chosen_move_uci` to exactly one move from `legal_moves` in lowercase UCI format like `e2e4` or `e7e8q`.
+
 Output JSON only:
 {
   "endgame_class": "known_or_unknown",
   "result_assessment": "WON|LOST|DRAWN|UNCLEAR",
-  "best_move": "...",
+  "chosen_move_uci": "...",
   "plan": "...",
   "tactical_notes": ["...", "..."],
   "justification": "..."

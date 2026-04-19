@@ -122,7 +122,7 @@ python3 play_chess.py --white-player human --black-player llm --llm-command "pyt
 Your adapter must print either:
 
 - a raw UCI move (example: `e2e4`)
-- or JSON with one of `move`, `best_move`, `uci`
+- or JSON with one of `chosen_move_uci`, `move`, `best_move`, `uci`
 
 Examples:
 
@@ -133,7 +133,7 @@ e2e4
 or
 
 ```json
-{"best_move":"e2e4"}
+{"chosen_move_uci":"e2e4"}
 ```
 
 ## 5) Phase routing prompts

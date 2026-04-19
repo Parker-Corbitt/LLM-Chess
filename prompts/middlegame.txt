@@ -19,17 +19,21 @@ Tasks:
 5. State who has the advantage and why.
 6. Justify chosen move in 2-4 sentences, emphasizing long-term plan supported by immediate tactics.
 
+Rules:
+1. Always set `chosen_move_uci` to exactly one move from `legal_moves` in lowercase UCI format like `e2e4` or `e7e8q`.
+2. If you mention alternative moves in `top3`, also write them in lowercase UCI.
+
 Output JSON only:
 {
-  "best_move": "...",
+  "chosen_move_uci": "...",
   "advantage": "WHITE|BLACK|EQUAL",
   "opening_context_used": true,
   "opening_context_summary": "...",
   "why_advantage": "...",
   "top3": [
-    {"move":"...", "score":"...", "tactical_points":["..."], "strategic_idea":"..."},
-    {"move":"...", "score":"...", "tactical_points":["..."], "strategic_idea":"..."},
-    {"move":"...", "score":"...", "tactical_points":["..."], "strategic_idea":"..."}
+    {"move_uci":"...", "score":"...", "tactical_points":["..."], "strategic_idea":"..."},
+    {"move_uci":"...", "score":"...", "tactical_points":["..."], "strategic_idea":"..."},
+    {"move_uci":"...", "score":"...", "tactical_points":["..."], "strategic_idea":"..."}
   ],
   "justification": "..."
 }

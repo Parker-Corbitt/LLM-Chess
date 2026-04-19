@@ -1,30 +1,17 @@
 #!/usr/bin/env python3
-"""Opening-book loader and retrieval helpers.
-
-This module implements the first step of the opening-book plan:
-1. Load a small curated opening database from disk.
-2. Index each reachable position to one or more known book moves.
-3. Return structured opening-line context for later integration with
-   `play_chess.py` and the LLM adapter payload.
-
-The lookup is deterministic and position-based. It does not use embeddings or
-semantic retrieval; for chess openings, exact board-state matching is the right
-primitive.
-"""
+"""Opening-book loader and retrieval helpers."""
 
 from __future__ import annotations
 
-import argparse
 import json
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Iterable, Sequence
+from typing import Any, Iterable
 
 import chess
 
-SCRIPT_DIR = Path(__file__).resolve().parent
-DEFAULT_BOOK_PATH = SCRIPT_DIR / "opening_book.json"
-
+# The book is expected to be at the project root
+DEFAULT_BOOK_PATH = Path("opening_book.json")
 
 def position_key(board: chess.Board) -> str:
     """Return a stable key for exact position matching.
@@ -301,62 +288,3 @@ def load_opening_book(book_path: Path | str = DEFAULT_BOOK_PATH) -> OpeningBook:
     """Convenience helper to build an indexed opening book from disk."""
 
     return OpeningBook.from_lines(load_opening_lines(book_path))
-
-
-def board_from_args(fen: str, moves: Sequence[str]) -> chess.Board:
-    """Build a board from CLI args for quick manual lookup testing."""
-
-    board = chess.Board(fen) if fen else chess.Board()
-    for move_text in moves:
-        move = chess.Move.from_uci(move_text)
-        if move not in board.legal_moves:
-            raise ValueError(f"Illegal move {move_text!r} for position {board.fen()}")
-        board.push(move)
-    return board
-
-
-def parse_args() -> argparse.Namespace:
-    """Parse CLI args for ad hoc opening-book inspection."""
-
-    parser = argparse.ArgumentParser(description="Inspect the local opening book.")
-    parser.add_argument(
-        "--book-path",
-        default=str(DEFAULT_BOOK_PATH),
-        help="Path to the opening book JSON file.",
-    )
-    parser.add_argument(
-        "--fen",
-        default="",
-        help="Optional starting FEN. Defaults to the standard initial position.",
-    )
-    parser.add_argument(
-        "--moves",
-        nargs="*",
-        default=[],
-        help="Optional sequence of UCI moves to apply before lookup.",
-    )
-    return parser.parse_args()
-
-
-def main() -> int:
-    """CLI entrypoint for inspecting opening matches."""
-
-    args = parse_args()
-    book = load_opening_book(args.book_path)
-    board = board_from_args(args.fen, args.moves)
-    print(
-        json.dumps(
-            {
-                "lines_loaded": book.line_count,
-                "indexed_positions": len(book),
-                "position": position_key(board),
-                "matches": book.lookup_payload(board),
-            },
-            indent=2,
-        )
-    )
-    return 0
-
-
-if __name__ == "__main__":
-    raise SystemExit(main())
